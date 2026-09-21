@@ -1,0 +1,149 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   RoadSight AI Design System
+   Premium dark engineering dashboard
+   ======================================== */
+
+:root {
+  --surface: #0a0a0f;
+  --surface-50: #0d0d14;
+  --surface-100: #12121a;
+  --surface-200: #1a1a24;
+  --surface-300: #22222e;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.15);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.12);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--surface);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-50);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-300);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--surface-400);
+}
+
+/* Glass Card */
+@layer components {
+  .glass-card {
+    @apply rounded-xl border border-white/[0.06] bg-surface-100/80 backdrop-blur-sm;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .glass-card:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.05);
+  }
+
+  .glass-card-interactive {
+    @apply glass-card cursor-pointer;
+  }
+  .glass-card-interactive:hover {
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 30px rgba(59, 130, 246, 0.1);
+    transform: translateY(-1px);
+  }
+
+  .metric-value {
+    @apply text-3xl font-bold tracking-tight text-white;
+  }
+  .metric-label {
+    @apply text-xs font-medium uppercase tracking-wider text-slate-500;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+  .status-dot-online {
+    @apply status-dot bg-emerald-500;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  }
+  .status-dot-offline {
+    @apply status-dot bg-red-500;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 bg-accent text-white font-semibold rounded-lg 
+           transition-all duration-200 hover:bg-accent-dim 
+           focus:outline-none focus:ring-2 focus:ring-accent/50
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary:hover:not(:disabled) {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 border border-white/10 text-slate-300 font-medium rounded-lg
+           transition-all duration-200 hover:border-white/20 hover:text-white
+           focus:outline-none focus:ring-2 focus:ring-white/10;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold tracking-tight text-white;
+  }
+  .section-subtitle {
+    @apply text-sm text-slate-500 mt-1;
+  }
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6, #06b6d4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Upload zone */
+.upload-zone {
+  @apply border-2 border-dashed border-white/10 rounded-xl p-8
+         transition-all duration-200 cursor-pointer
+         flex flex-col items-center justify-center gap-3
+         min-h-[200px];
+}
+.upload-zone:hover,
+.upload-zone.drag-over {
+  @apply border-accent/50 bg-accent/5;
+}
+
+/* Pipeline flow */
+.pipeline-step {
+  @apply flex items-center gap-2 text-sm text-slate-400;
+}
+.pipeline-arrow {
+  @apply text-slate-600;
+}

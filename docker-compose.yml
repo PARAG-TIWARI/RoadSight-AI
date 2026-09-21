@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: roadsight-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_FORMAT=onnx
+      - MODEL_PATH=best.onnx
+      - CONFIDENCE_THRESHOLD=0.40
+      - NMS_IOU_THRESHOLD=0.50
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:80,http://localhost
+      - MAX_VIDEO_FRAMES=500
+    volumes:
+      - ./backend/models:/app/models:ro
+      - backend-temp:/app/tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:8000
+    container_name: roadsight-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend-temp:
