@@ -1,145 +1,150 @@
-# RoadSight AI — Deployment & Operations Guide
+# Local development and deployment
 
-## 1. Architecture Overview for Deployment
+This guide covers local development and container use for the current repository. The deployment examples are starting points; they are not evidence that a hosted service is currently running.
 
-RoadSight AI is designed as two decoupled services:
-1. **Backend**: Python 3.11+ FastAPI microservice serving REST endpoints with ONNX Runtime inference engine.
-2. **Frontend**: Single Page Application (SPA) built with React 18, Vite, and Tailwind CSS.
+## Prerequisites
 
----
+- Python 3.11 (recommended; the backend Docker image uses Python 3.11).
+- Node.js 20 LTS and npm.
+- Git.
+- Docker Engine and Docker Compose plugin, if using containers.
 
-## 2. Local Development Setup
+The ONNX Runtime path is the default backend setup. The optional PyTorch path additionally needs `torch` and `ultralytics`.
 
-### Prerequisites
-- Python 3.10, 3.11, or 3.12
-- Node.js 18+ and npm 9+
-- Git
+## 1. Run the backend locally
 
-### Backend Setup
+From the repository root:
+
 ```bash
-# 1. Navigate to backend directory
 cd backend
-
-# 2. (Optional) Create and activate virtual environment
 python -m venv .venv
-# On Windows:
-.venv\Scripts\activate
-# On Linux/macOS:
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+# macOS / Linux
 source .venv/bin/activate
 
-# 3. Install dependencies
 pip install -r requirements.txt
+```
 
-# 4. Configure environment
+Copy the root environment template into the backend working directory:
+
+**Windows PowerShell**
+
+```powershell
+Copy-Item ../.env.example .env
+```
+
+**macOS / Linux**
+
+```bash
 cp ../.env.example .env
+```
 
-# 5. Start Uvicorn development server
+The default template selects ONNX inference and the `best.onnx` artifact. Start FastAPI from the `backend/` directory:
+
+```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-Backend API will be accessible at `http://localhost:8000` with Swagger UI at `http://localhost:8000/docs`.
 
-### Frontend Setup
+Useful local endpoints:
+
+- Health: `http://localhost:8000/api/v1/health`
+- Model information: `http://localhost:8000/api/v1/model`
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+## 2. Run the frontend locally
+
+Open a second terminal:
+
 ```bash
-# 1. Navigate to frontend directory
 cd frontend
+npm ci
+```
 
-# 2. Install dependencies
-npm install
+Create `frontend/.env.local`:
 
-# 3. Start Vite dev server
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Start the Vite development server:
+
+```bash
 npm run dev
 ```
-Frontend interface will be accessible at `http://localhost:5173`.
 
----
+Open `http://localhost:5173`.
 
-## 3. Containerized Deployment (Docker & Compose)
+## 3. Run with Docker Compose
 
-### Single-Command Deployment via Docker Compose
-RoadSight AI includes a production-ready `docker-compose.yml` for unified local or server deployment:
+From the repository root:
 
 ```bash
-# Build and run containers in detached mode
-docker-compose up -d --build
-
-# Inspect logs
-docker-compose logs -f
-
-# Stop containers
-docker-compose down
+docker compose up --build
 ```
 
-This launches:
-- **Backend container**: `http://localhost:8000`
-- **Frontend container**: `http://localhost:80` (or configured port)
+The Compose configuration publishes:
+- Frontend: `http://localhost:80`
+- Backend: `http://localhost:8000`
 
-### Standalone Backend Docker
+The backend container is configured to listen on port 8000 in Compose so that its published port and health check use the same container port.
+
+Stop the stack with:
+
 ```bash
-cd backend
-docker build -t roadsight-backend:latest .
-docker run -p 8000:8000 --env-file ../.env roadsight-backend:latest
+docker compose down
 ```
 
-### Standalone Frontend Docker
+## 4. Run tests and build checks
+
+Backend tests (from the repository root, with backend dependencies installed):
+
 ```bash
-cd frontend
-docker build -t roadsight-frontend:latest .
-docker run -p 80:80 roadsight-frontend:latest
+python -m pytest backend/tests -v
 ```
 
----
+Frontend checks (from `frontend/`):
 
-## 4. Production Cloud Deployment
+```bash
+npm run lint
+npm run build
+```
 
-### 4.1 Backend Deployment (Render / Railway / Fly.io)
+Record the actual command output and environment when reporting test results.
 
-> [!IMPORTANT]
-> **Free Tier RAM Constraint**:
-> Free hosting tiers (such as Render's 512MB RAM tier) will fail if loading PyTorch/Ultralytics due to memory exhaustion. RoadSight AI solves this with its **ONNX Runtime engine**, requiring only ~180MB RAM.
-> Ensure `MODEL_FORMAT=onnx` is set in your production environment variables.
+## 5. Hosted deployment considerations
 
-#### Deploying to Render:
-1. Create a new **Web Service** on Render connected to your repository.
-2. Configure settings:
-   - **Root Directory**: `backend`
-   - **Environment**: `Python`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2`
-3. Add Environment Variables:
-   - `MODEL_FORMAT`: `onnx`
-   - `MODEL_PATH`: `best.onnx`
-   - `CORS_ORIGINS`: `https://your-frontend.vercel.app,http://localhost:5173`
-   - `MAX_VIDEO_FRAMES`: `300`
-   - `CONFIDENCE_THRESHOLD`: `0.4`
+Before deploying a public instance, review the following:
 
-### 4.2 Frontend Deployment (Vercel / Netlify)
+- Use HTTPS for the frontend-to-backend connection.
+- Set `CORS_ORIGINS` to the exact frontend origin(s); do not use a wildcard for a credentialed or sensitive deployment.
+- Set the backend `PORT` to the port supplied by the hosting platform.
+- Keep `MODEL_FORMAT=onnx` unless the environment has been provisioned with the optional PyTorch dependencies and sufficient memory.
+- Start with one server worker. Each worker loads its own model instance, so increasing worker count increases model memory use; scale only after measuring the available RAM and throughput.
+- Use persistent storage only if processed videos must survive process restarts. Current video outputs are stored in the configured temporary directory and may be removed.
+- Apply an ingress/request-body limit at the proxy or hosting layer. The application currently reads the upload payload before its file-size validation runs.
+- Store secrets in the hosting provider's environment configuration. Do not commit production `.env` files or model/API credentials.
 
-#### Deploying to Vercel:
-1. Import repository on Vercel.
-2. Configure project:
-   - **Framework Preset**: `Vite`
-   - **Root Directory**: `frontend`
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-3. Add Environment Variable:
-   - `VITE_API_URL`: `https://your-backend.onrender.com`
-4. Deploy!
+The backend Docker image uses a default port of 10000 when no `PORT` is supplied. Docker Compose overrides that to 8000 to match its local port mapping. For other platforms, use the platform-provided port.
 
----
+## 6. Operational checks
 
-## 5. Health Checks & Verification Checklist
+After deployment, verify the service using the platform's assigned URL:
 
-1. **Verify Backend Health**:
-   ```bash
-   curl -s http://localhost:8000/api/v1/health | jq .
-   ```
-2. **Verify Model Metadata**:
-   ```bash
-   curl -s http://localhost:8000/api/v1/model | jq .
-   ```
-3. **Run In-Service Benchmark**:
-   ```bash
-   curl -s -X POST "http://localhost:8000/api/v1/benchmark?iterations=20" | jq .
-   ```
-4. **Inspect Swagger Documentation**:
-   Navigate to `http://localhost:8000/docs` in your browser.
+```bash
+curl -i https://<backend-host>/api/v1/health
+curl -i https://<backend-host>/api/v1/model
+```
+
+Run a small benchmark only when the service is not handling latency-sensitive traffic:
+
+```bash
+curl -i "https://<backend-host>/api/v1/benchmark?iterations=10"
+```
+
+The benchmark endpoint runs synchronously in the API process and can consume CPU/GPU resources while it is running.
+
+A health response confirms that the API process is responding; it does not establish model accuracy or end-to-end application correctness.

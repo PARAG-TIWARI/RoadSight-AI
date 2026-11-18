@@ -1,88 +1,145 @@
-# RoadSight AI — Model Evaluation & Performance Analysis
+# Model evaluation and benchmarking
 
-## 1. Overview & Evaluation Methodology
+This guide describes what the current repository can measure, how to run it and what evidence should be retained when reporting results.
 
-This document outlines the evaluation protocols, quantitative metrics, failure modes, and edge cases for the RoadSight AI YOLOv8-seg pothole detection and instance segmentation models.
+## 1. Evaluation supported by the current script
 
-### Evaluation Metrics
+The current `scripts/evaluate.py` implementation performs **binary-mask evaluation**. It does not calculate YOLO detection mAP, box AP, per-instance mask AP or class-wise object-detection metrics.
 
-| Metric | Formulation | Description |
-| :--- | :--- | :--- |
-| **Precision** | $\frac{TP}{TP + FP}$ | Fraction of predicted pothole regions that are genuine defects. |
-| **Recall** | $\frac{TP}{TP + FN}$ | Fraction of real potholes successfully detected by the system. |
-| **F1-Score** | $2 \cdot \frac{P \cdot R}{P + R}$ | Harmonic mean of Precision and Recall. |
-| **mAP@50 (Box)** | $\int_{0}^{1} p(r) dr \text{ @ } \text{IoU}=0.50$ | Mean Average Precision for bounding box localization. |
-| **mAP@50-95 (Mask)** | $\frac{1}{10} \sum_{k=0.5}^{0.95} \text{AP}_k$ | Stringent Average Precision evaluating segmentation boundaries. |
-| **Mask IoU (Jaccard)** | $\frac{\lvert M_{\text{pred}} \cap M_{\text{gt}} \rvert}{\lvert M_{\text{pred}} \cup M_{\text{gt}} \rvert}$ | Exact overlap of segmented pothole polygon against ground truth. |
-| **Dice Coefficient** | $\frac{2 \lvert M_{\text{pred}} \cap M_{\text{gt}} \rvert}{\lvert M_{\text{pred}} \rvert + \lvert M_{\text{gt}} \rvert}$ | Metric sensitive to boundary precision on smaller defects. |
+For each image/mask pair, it:
 
----
+1. Loads the input image.
+2. Runs the configured RoadSight model through the image inference pipeline.
+3. Decodes the returned combined mask image.
+4. Resizes the predicted mask to the ground-truth mask dimensions if required.
+5. Calculates mask IoU, Dice, pixel-level precision, pixel-level recall, pixel-level F1 and relative mask-area error.
 
-## 2. Quantitative Model Metrics
+The aggregate report contains the number of pairs and the mean of those per-image metrics. Individual per-image results are also written when an output path is supplied.
 
-### Segmentation & Detection Performance (Test Split: 640x640)
+### Expected directory layout
 
-> [!NOTE]
-> Values evaluated on the curated Pothole-600 validation split with ground truth annotations.
+The evaluator expects images and ground-truth masks in separate directories:
 
-| Model Checkpoint | Parameters | mAP@50 (Box) | mAP@50-95 (Box) | mAP@50 (Mask) | mAP@50-95 (Mask) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **YOLOv8s-seg (PyTorch)** | 11.8M | 84.6% | 58.2% | 81.3% | 52.7% |
-| **YOLOv8s-seg (ONNX FP32)** | 11.8M | 84.5% | 58.1% | 81.2% | 52.6% |
-| **YOLOv8s-seg (ONNX FP16)** | 11.8M | 84.2% | 57.8% | 80.9% | 52.3% |
+```text
+evaluation-data/
+├── images/
+│   ├── frame_001.jpg
+│   ├── frame_002.jpg
+│   └── frame_003.png
+└── masks/
+    ├── frame_001.png
+    ├── frame_002.png
+    └── frame_003.png
+```
 
-*Note: The ONNX export preserves 99.9% of the original PyTorch model's localization and segmentation fidelity while offering significant throughput gains.*
+Image extensions currently discovered by the script are `.jpg` and `.png`. For every image, the matching ground-truth filename must use the same stem and a `.png` extension in the masks directory. Masks are read as grayscale and thresholded at 127 to create a binary foreground mask.
 
----
+Keep the image and mask pairs aligned. Use a held-out test set that was not used to train or tune the model. Record the dataset source, licence, split and annotation procedure.
 
-## 3. Latency & Throughput Benchmark
+### Run the evaluator
 
-Inference benchmarks measured across 100 warm iterations at standard $640 \times 640$ input resolution:
-
-### CPU Benchmarks (x86_64, 8 Cores)
-| Framework / Engine | Precision | Mean Latency (ms) | P90 Latency (ms) | P99 Latency (ms) | FPS | Memory (RSS) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **PyTorch (Ultralytics)** | FP32 | 142.3 ms | 158.0 ms | 185.2 ms | 7.0 FPS | ~680 MB |
-| **ONNX Runtime (CPU)** | FP32 | 58.4 ms | 64.1 ms | 76.5 ms | 17.1 FPS | ~210 MB |
-| **ONNX Runtime (CPU)** | INT8 (Quantized) | 36.2 ms | 41.0 ms | 49.8 ms | 27.6 FPS | ~145 MB |
-
-### GPU Benchmarks (NVIDIA RTX 3080 / CUDA 12)
-| Framework / Engine | Precision | Mean Latency (ms) | P90 Latency (ms) | P99 Latency (ms) | FPS | Memory (VRAM) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **PyTorch (Ultralytics)** | FP16 | 12.8 ms | 14.2 ms | 17.0 ms | 78 FPS | ~1.4 GB |
-| **ONNX Runtime (CUDA)** | FP16 | 8.2 ms | 9.1 ms | 11.4 ms | 122 FPS | ~650 MB |
-| **TensorRT 8.6** | FP16 | 4.6 ms | 5.1 ms | 6.3 ms | 217 FPS | ~480 MB |
-
----
-
-## 4. Edge Cases & Failure Modes Analysis
-
-### Identified Edge Scenarios
-1. **Ponding / Standing Water**:
-   - *Failure Mode*: Wet road patches reflect sky/clouds, occasionally creating false positive boundaries or masking submerged pothole contours.
-   - *Mitigation*: Multi-frame persistence filter requires defect consistency across $\ge 3$ frames; transient specular glares are rejected.
-2. **Asphalt Patches & Tar Seams**:
-   - *Failure Mode*: Irregular, freshly laid black asphalt patches exhibit high contrast against oxidized grey pavement, resembling pothole cavities.
-   - *Mitigation*: Depth contour cues and ratio thresholding between bounding-box perimeter vs mask convexity.
-3. **Low-Light / Night Conditions**:
-   - *Failure Mode*: Dashcam sensor noise and headlight focal hotspots alter pavement texture.
-   - *Mitigation*: Contrast-limited adaptive histogram equalization (CLAHE) preprocessing option in low-exposure scenarios.
-4. **Extreme Angles / Distant Defects**:
-   - *Failure Mode*: Defects located near the horizon line occupy $< 15$ pixels, below reliable segmentation threshold.
-   - *Mitigation*: Minimum bounding box and area filtering (`MIN_AREA_PIXELS=300`) discards low-resolution horizon artifacts.
-
----
-
-## 5. Running Custom Evaluation
-
-To evaluate on your custom annotated dataset:
+From the repository root, with the backend dependencies installed and the configured model file available:
 
 ```bash
-# Prepare dataset in YOLO-seg format (images/ and labels/ with normalized polygons)
 python scripts/evaluate.py \
-    --data-dir ./data/test_dataset \
-    --model-path ./backend/models/best.onnx \
-    --conf-thresh 0.4 \
-    --iou-thresh 0.5 \
-    --output ./data/evaluation_report.json
+  --images ./evaluation-data/images \
+  --masks ./evaluation-data/masks \
+  --output ./evaluation-report.json
 ```
+
+The script loads the model through the backend model manager. Ensure that the backend configuration points to the checkpoint you intend to evaluate. The default is the ONNX model configured in `backend/app/core/config.py`.
+
+### Metrics
+
+| Metric | Meaning |
+| --- | --- |
+| Mask IoU | Intersection divided by union between predicted and ground-truth foreground pixels |
+| Dice | Overlap score based on twice the intersection divided by the sum of foreground pixels |
+| Pixel precision | Share of predicted foreground pixels that are ground-truth foreground |
+| Pixel recall | Share of ground-truth foreground pixels recovered by the prediction |
+| Pixel F1 | Harmonic mean of pixel precision and recall |
+| Relative area error | Absolute difference in predicted and ground-truth mask area divided by ground-truth mask area |
+
+Empty-mask cases are handled by the metric functions in `backend/app/services/metrics.py`. Interpret results in the context of the dataset and annotation quality.
+
+## 2. Detection metrics not currently reproduced by this repository
+
+Earlier versions of this documentation included YOLOv8 box/mask mAP figures and attributed them to a Pothole-600 split. The current repository does not include that dataset or a YOLO-format mAP evaluation runner. The checked-in evaluator cannot reproduce those mAP figures.
+
+For that reason, those figures are not repeated here as validated results. They should only be published again when the exact dataset version, split, annotation files, checkpoint, evaluation command and raw output are available for review.
+
+If you run Ultralytics validation separately, retain its full console output or JSON/CSV results and document the exact command and package version. Keep that result distinct from the mask-level metrics produced by `scripts/evaluate.py`.
+
+## 3. Inference benchmark included in the project
+
+The current `scripts/benchmark.py` calls `backend/app/services/benchmark.py`. That service creates a synthetic 640-by-640 test image and measures the inference engines that are available:
+
+- ONNX Runtime, using CUDA when its CUDA execution provider is installed and otherwise CPU.
+- PyTorch/Ultralytics, when `torch`, `ultralytics` and `backend/models/best.pt` are available.
+
+The timer measures model inference calls. It does not measure image upload, request parsing, preprocessing, post-processing, mask rendering, video processing or frontend latency. The input is synthetic, not a representative road image.
+
+The current implementation does not provide a TensorRT benchmark or a separate INT8-quantized ONNX benchmark. Do not report those rows as results from this script.
+
+### Run a benchmark
+
+```bash
+python scripts/benchmark.py --iterations 50 --warmup 5 --format all
+```
+
+Options:
+- `--iterations`: number of timed runs (default 20).
+- `--warmup`: number of warm-up runs (default 3).
+- `--format`: output filter for `all`, `onnx` or `pytorch`. The current service attempts each available backend before the CLI filters the returned list.
+- `--output`: optional path for a JSON result file.
+
+The API benchmark endpoint is also available at:
+
+```text
+GET /api/v1/benchmark?iterations=20
+```
+
+The endpoint runs in the request process and blocks while the benchmark executes. Use a modest iteration count and avoid running it during latency-sensitive use.
+
+### What to record with every benchmark
+
+Include all of the following with a published result:
+
+- Commit SHA and model file/checksum.
+- Operating system and Python version.
+- CPU model, core count and available RAM.
+- GPU model, driver and CUDA version when applicable.
+- ONNX Runtime, PyTorch and Ultralytics versions.
+- Active ONNX execution provider or PyTorch device.
+- Input resolution, iteration count and warm-up count.
+- Mean, P50, P90, P99 latency, FPS and memory measurement.
+- Whether the reported timing is model-only or end-to-end.
+
+Do not compare two measurements if the environment or timing scope differs materially.
+
+## 4. Failure cases to test
+
+Use a held-out set that includes varied road surfaces and capture conditions. At minimum, review:
+
+- Wet pavement, standing water and reflections.
+- Dark asphalt repairs, tar seams and road markings.
+- Low-light and night footage.
+- Motion blur, camera shake and compression artefacts.
+- Small or distant defects.
+- Images with no potholes.
+- Different camera angles and road materials.
+
+The event processor is based on frame-level detection summaries. Its persistence event means a detection was present for the configured number of consecutive processed frames; it is not proof that the same physical pothole was tracked across frames.
+
+## 5. Dataset and result provenance
+
+The `data/` directory currently contains preparation guidance, not the full training or test dataset. Before describing a result as independently reproducible, add or link to:
+
+- Dataset source and licence.
+- Version/date and split definition.
+- Annotation instructions and class mapping.
+- Image/mask counts and any exclusions.
+- The exact model checkpoint used.
+- Raw evaluator or benchmark output.
+
+Avoid including private, unlicensed or sensitive road footage in the repository.
