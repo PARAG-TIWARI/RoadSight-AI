@@ -9,6 +9,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - PORT=8000
       - MODEL_FORMAT=onnx
       - MODEL_PATH=best.onnx
       - CONFIDENCE_THRESHOLD=0.40
