@@ -1,292 +1,211 @@
-# RoadSight AI — Intelligent Road Defect Detection & Video Analytics
+# RoadSight AI
 
-[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-1.20+-005CED?logo=onnx&logoColor=white)](https://onnxruntime.ai)
-[![YOLOv8](https://img.shields.io/badge/YOLOv8-Instance%20Segmentation-00FFFF)](https://github.com/ultralytics/ultralytics)
-[![OpenCV](https://img.shields.io/badge/OpenCV-4.10+-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org)
-[![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react&logoColor=black)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-3.4-38B2D9?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://docker.com)
+RoadSight AI is a computer-vision portfolio project for detecting and segmenting pothole-like road defects in still images and processing road footage frame by frame. It combines a YOLOv8 segmentation model with a FastAPI service and a React dashboard.
 
-RoadSight AI is a production-engineered Computer Vision and Video Analytics system designed for automated road surface inspection, defect detection, and severity assessment. It transforms raw dashcam video and street imagery into actionable spatial and temporal infrastructure insights.
+The repository includes ONNX and PyTorch model artifacts, an image/video inference API, post-processing utilities, evaluation helpers and a small frontend for interacting with the API.
 
-Built with an emphasis on **production machine learning engineering**, RoadSight AI avoids toy prototypes by featuring dual-engine inference (ONNX Runtime + PyTorch), custom postprocessing and tensor-multiplication mask synthesis, multi-frame temporal persistence filtering, hardware resource profiling, and an interactive dark-mode dashboard.
+> **Project status:** This repository documents a locally runnable project. No hosted demo is documented here. Model results and performance figures should be treated as project-reported measurements unless they are accompanied by the dataset, run configuration and raw output needed to reproduce them.
 
----
+## What it does
 
-## Key Features & Engineering Highlights
+- **Image inference:** accepts an image, runs the selected model backend and returns detections, a combined mask, visual overlays and timing information.
+- **Video processing:** processes video frames with OpenCV and returns frame-level summaries plus event records.
+- **Segmentation post-processing:** decodes YOLOv8-seg outputs, applies confidence filtering and non-maximum suppression, and combines prototype masks.
+- **Two inference options:** ONNX Runtime is the default path; the PyTorch/Ultralytics path is available when its optional dependencies are installed.
+- **Runtime information:** exposes model metadata, health, basic in-process counters and an inference benchmark endpoint.
+- **Web interface:** provides image analysis, video analysis, model information, benchmark results and API reference pages.
 
-- **YOLOv8 Instance Segmentation**: Extracts pixel-level defect contours, spatial bounding boxes, and surface area ratios for potholes and pavement distress.
-- **Dual Inference Engine Architecture**:
-  - **Primary**: High-throughput, low-memory **ONNX Runtime** with CPU (`CPUExecutionProvider`) and GPU (`CUDAExecutionProvider`) acceleration.
-  - **Fallback / Development**: Native **PyTorch (Ultralytics)** backend with dynamic weight loading.
-- **Custom Post-Processing**: Complete, decoupled implementation of Non-Maximum Suppression (NMS), box coordinate transformations (`xywh` $\rightarrow$ `xyxy`), prototype mask tensor multiplication, and contour boundary extraction.
-- **Temporal Event Processing (Video Analytics)**:
-  - Frame-by-frame streaming pipeline without unbounded memory buffering.
-  - Spatial defect tracking across frames using bounding-box IoU association.
-  - Multi-frame persistence thresholding ($N_{\text{persist}} \ge 3$) to eliminate transient false alarms caused by camera vibration or lighting flicker.
-  - Automatic severity scoring (Low, Moderate, Critical) based on surface area ratio, confidence, and duration.
-- **Hardware & Latency Profiling**: Real-time measurement of P50, P90, P99, and Mean inference latencies, throughput (FPS), and process memory consumption (`psutil`).
-- **Modern Web Dashboard**: Clean, responsive engineering UI built with React 18, Vite, TypeScript, and Tailwind CSS.
-- **RESTful OpenAPI 3.1 Backend**: Fully typed FastAPI microservice with Pydantic V2 schemas and complete Swagger / ReDoc interactive documentation.
-
----
+The video event processor is a lightweight **frame-level persistence state machine**. It aggregates detection count, average confidence and mask-area information across consecutive frames. It is not a per-object tracker and does not associate individual potholes using bounding-box IoU.
 
 ## Architecture
 
-```
-                                  +------------------------------------------+
-                                  |  RoadSight AI Web Client / REST API Client|
-                                  +------------------------------------------+
-                                                       |
-                                        HTTP Multipart / JSON (/api/v1)
-                                                       v
-+---------------------------------------------------------------------------------------------------------------+
-|                                            FastAPI Gateway                                                    |
-|                                                                                                               |
-|  +-------------------------+  +-------------------------+  +---------------------+  +----------------------+  |
-|  | /predict/image          |  | /predict/video          |  | /benchmark          |  | /model & /health     |  |
-|  | Single Image Inference  |  | Streaming Video Pipeline|  | Latency & Profiling |  | System Introspection |  |
-|  +-------------------------+  +-------------------------+  +---------------------+  +----------------------+  |
-|               |                            |                          |                         |             |
-|               v                            v                          v                         v             |
-|  +-------------------------+  +-------------------------+  +---------------------+  +----------------------+  |
-|  | Preprocessing           |  | Streaming Frame Capture |  | Benchmark Engine    |  | Model Metadata       |  |
-|  | - Decode & Validate     |  | - OpenCV VideoCapture   |  | - Warmup & Profiling|  | - Runtime Specs      |  |
-|  | - Letterbox / Normalise |  | - Frame Skip Control    |  | - P50/P90/P99 Stats |  | - Provider Info      |  |
-|  +-------------------------+  +-------------------------+  +---------------------+  +----------------------+  |
-|               \                            /                          |                                       |
-|                \                          /                           |                                       |
-|                 v                        v                            |                                       |
-|  +-------------------------------------------------------------------------+                                  |
-|  |                                  ModelManager                           |                                  |
-|  |                     +---------------------------------+                 |                                  |
-|  |                     |  ONNX Runtime (CPU / CUDA)      | <---------------+                                  |
-|  |                     |  PyTorch Fallback (Ultralytics) |                                                    |
-|  |                     +---------------------------------+                                                    |
-|  +-------------------------------------------------------------------------+                                  |
-|                                      |                                                                        |
-|                                      v                                                                        |
-|  +-------------------------------------------------------------------------+                                  |
-|  |                     Post-Processing & Mask Engine                       |                                  |
-|  |  - Box Decoding (xywh -> xyxy)          - Pairwise IoU Computation      |                                  |
-|  |  - Non-Maximum Suppression (NMS)        - Prototype Mask MatMul & Sigmoid|                                 |
-|  |  - Boundary Contours & Severity Index   - Visualization & Heatmap Render|                                  |
-|  +-------------------------------------------------------------------------+                                  |
-|                                      |                                                                        |
-|                                      v                                                                        |
-|  +-------------------------------------------------------------------------+                                  |
-|  |                      Temporal Event Processor                           |                                  |
-|  |  - Multi-frame IoU Tracking             - Persistence Verification      |                                  |
-|  |  - Hazard Timeline Aggregation          - Annotated Video Encoding      |                                  |
-|  +-------------------------------------------------------------------------+                                  |
-+---------------------------------------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    Browser[React + Vite dashboard] -->|HTTP / multipart| API[FastAPI API]
+    API --> Pre[OpenCV decode and direct resize]
+    Pre --> Manager[Model manager]
+    Manager --> ONNX[ONNX Runtime]
+    Manager --> Torch[PyTorch / Ultralytics optional]
+    ONNX --> Decode[YOLO output decoding and NMS]
+    Decode --> Masks[Mask construction]
+    Torch --> Results[Ultralytics prediction results]
+    Results --> Visuals[Visualisation and response schema]
+    Masks --> Visuals
+    Visuals --> Browser
+    API --> Video[Frame-by-frame video service]
+    Video --> Events[Frame-level event state machine]
+    Events --> Browser
 ```
 
----
+### Important implementation details
 
-## Performance & Benchmark Results
+- Images are resized directly to the configured square input size (640 by default), converted from BGR to RGB, normalised to the 0–1 range and transposed to NCHW. This is a direct resize, not aspect-preserving letterboxing.
+- The ONNX post-processing path expects a YOLOv8-seg style detection output and a prototype-mask output.
+- The video processor emits event types such as `new_detection`, `persistent`, `high_confidence`, `large_area` and `lost` based on frame-level summaries.
+- The configured upload-size limit is checked in the inference validation functions after the API route has read the uploaded payload into memory. It is not currently a streaming request-body limit.
 
-Evaluated on $640 \times 640$ resolution across 100 benchmark iterations:
+For a component-by-component view, see [Architecture](docs/architecture.md).
 
-### Latency Comparison (x86_64 CPU, 8 Cores)
-| Inference Engine | Precision | Mean Latency | P90 Latency | P99 Latency | Throughput (FPS) | RSS Memory |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ONNX Runtime (CPU)** | **FP32** | **58.4 ms** | **64.1 ms** | **76.5 ms** | **17.1 FPS** | **~210 MB** |
-| PyTorch (Ultralytics) | FP32 | 142.3 ms | 158.0 ms | 185.2 ms | 7.0 FPS | ~680 MB |
-| ONNX Runtime (Quantized) | INT8 | 36.2 ms | 41.0 ms | 49.8 ms | 27.6 FPS | ~145 MB |
+## Technology
 
-### GPU Acceleration (NVIDIA RTX 3080 / CUDA 12)
-| Inference Engine | Precision | Mean Latency | P90 Latency | P99 Latency | Throughput (FPS) | VRAM Usage |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ONNX Runtime (CUDA)** | **FP16** | **8.2 ms** | **9.1 ms** | **11.4 ms** | **122 FPS** | **~650 MB** |
-| PyTorch (Ultralytics) | FP16 | 12.8 ms | 14.2 ms | 17.0 ms | 78 FPS | ~1.4 GB |
-| TensorRT 8.6 | FP16 | 4.6 ms | 5.1 ms | 6.3 ms | 217 FPS | ~480 MB |
+| Area | Technologies |
+| --- | --- |
+| Model | YOLOv8 instance segmentation |
+| Inference | ONNX Runtime (CPU or CUDA provider when available); PyTorch/Ultralytics optional path |
+| Image and video processing | OpenCV, NumPy |
+| Backend | Python, FastAPI, Pydantic |
+| Frontend | React 18, Vite, TypeScript, Tailwind CSS |
+| Packaging | Docker and Docker Compose |
+| Tests | Pytest, FastAPI TestClient |
 
-> **Key Takeaway**: ONNX Runtime provides a **2.4x speedup** on CPU and a **1.5x speedup** on GPU compared to native PyTorch, while cutting host memory usage by over 65%. This makes ONNX Runtime ideal for containerized cloud deployment on memory-constrained tiers (such as Render's 512MB RAM tier).
+## Repository layout
 
----
-
-## Project Structure
-
-```
-roadsight-ai/
+```text
+RoadSight-AI/
 ├── backend/
 │   ├── app/
-│   │   ├── api/
-│   │   │   └── routes.py              # REST API endpoints (/health, /model, /predict, /benchmark)
-│   │   ├── core/
-│   │   │   ├── config.py              # Pydantic Settings & environment validation
-│   │   │   ├── model.py               # Dual-backend ModelManager (ONNX + PyTorch)
-│   │   │   └── postprocessing.py      # Decoded boxes, NMS, prototype masks, scaling
-│   │   ├── schemas/
-│   │   │   └── responses.py           # Pydantic response models & schema contracts
-│   │   ├── services/
-│   │   │   ├── image_inference.py     # End-to-end single image inference pipeline
-│   │   │   ├── video_inference.py     # Frame-by-frame streaming video pipeline
-│   │   │   ├── events.py              # Temporal defect tracker & persistence filter
-│   │   │   ├── benchmark.py           # In-memory latency & psutil resource profiler
-│   │   │   └── metrics.py             # IoU, Dice, Precision, Recall, F1 formulas
-│   │   ├── utils/
-│   │   │   ├── preprocessing.py       # Image decoding, letterboxing, normalization
-│   │   │   └── visualization.py       # Detection boxes, translucent masks, heatmaps
-│   │   └── main.py                    # FastAPI application & lifespan management
-│   ├── models/
-│   │   ├── best.onnx                  # Trained YOLOv8-seg ONNX model (13.3 MB)
-│   │   └── best.pt                    # Checkpoint for re-export & PyTorch engine
+│   │   ├── api/             # FastAPI routes
+│   │   ├── core/            # Settings, model manager and post-processing
+│   │   ├── schemas/         # API response schemas
+│   │   ├── services/        # Image/video inference, events and benchmarks
+│   │   └── utils/           # Input preprocessing and visualisation
+│   ├── models/              # best.onnx and best.pt
 │   ├── tests/
-│   │   ├── test_api.py                # Integration tests for all REST endpoints
-│   │   ├── test_preprocessing.py      # Unit tests for input parsing & letterboxing
-│   │   ├── test_postprocessing.py     # Unit tests for NMS, IoU, box scaling
-│   │   └── test_metrics.py            # Unit tests for IoU and segmentation metrics
-│   ├── Dockerfile                     # Optimized Python 3.11 slim container
-│   └── requirements.txt               # Locked backend dependencies
-│
+│   ├── Dockerfile
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── layout/                # Navbar, Footer
-│   │   │   └── dashboard/             # MetricCard, StatusBadge
 │   │   ├── pages/
-│   │   │   ├── HomePage.tsx           # Hero, live stats, pipeline showcase
-│   │   │   ├── ImageAnalysisPage.tsx  # Drag & drop upload, confidence slider, mask overlays
-│   │   │   ├── VideoAnalysisPage.tsx  # Video upload, processing stream, event timeline
-│   │   │   ├── BenchmarksPage.tsx     # Interactive latency & throughput comparison
-│   │   │   ├── ModelInfoPage.tsx      # Checkpoint architecture & runtime metadata
-│   │   │   └── ApiDocsPage.tsx        # Interactive API catalog & curl examples
-│   │   ├── services/api.ts            # Typed Axios client with retry logic
-│   │   ├── types/index.ts             # TypeScript definitions matching Pydantic schemas
-│   │   ├── App.tsx                    # React Router 6 setup with lazy loading
-│   │   └── index.css                  # Custom dark-theme design tokens
-│   ├── Dockerfile                     # Multi-stage Node build -> Nginx Alpine
-│   └── package.json                   # Frontend dependencies
-│
-├── docs/
-│   ├── architecture.md                # In-depth system design & sequence diagrams
-│   ├── model-evaluation.md            # Benchmark protocols, mAP metrics, failure modes
-│   └── deployment.md                  # Comprehensive local, Docker, and Cloud deployment
-│
-├── data/
-│   └── README.md                      # Dataset specifications & annotation guidelines
-│
-├── scripts/
-│   ├── export_onnx.py                 # PyTorch checkpoint to ONNX exporter with validation
-│   ├── benchmark.py                   # Standalone CLI benchmarking suite
-│   └── evaluate.py                    # Dataset evaluation script with mAP computation
-│
-├── docker-compose.yml                 # Unified multi-service deployment
-├── .env.example                       # Environment variable template
-├── .gitignore                         # Git exclusion rules
-└── README.md                          # Repository documentation
+│   │   ├── components/
+│   │   └── services/
+│   └── package.json
+├── data/                    # Dataset layout and annotation guidance
+├── docs/                    # Architecture, evaluation and deployment guides
+├── scripts/                 # Evaluation, benchmarking and ONNX export
+├── docker-compose.yml
+└── README.md
 ```
 
----
+## Run locally
 
-## Quickstart Guide
+### 1. Backend
 
-### Option 1: Docker Compose (Recommended)
-
-Run both the backend API and frontend dashboard with a single command:
-
-```bash
-# Clone and enter the repository
-cd RoadSight-AI
-
-# Launch services
-docker-compose up -d --build
-```
-
-- **Frontend Application**: [http://localhost:80](http://localhost:80)
-- **Backend API**: [http://localhost:8000](http://localhost:8000)
-- **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-
----
-
-### Option 2: Local Development
-
-#### 1. Backend Setup
+The backend requirements install the ONNX inference path. The optional PyTorch backend requires additional packages (`torch` and `ultralytics`) that are not listed in `backend/requirements.txt`.
 
 ```bash
 cd backend
-
-# Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install requirements
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -r requirements.txt
+# Optional, only when using MODEL_FORMAT=pytorch:
+# pip install torch ultralytics
 
-# Start FastAPI server
+# Copy the root environment template into backend/.env
+# Windows PowerShell: Copy-Item ../.env.example .env
+# macOS / Linux: cp ../.env.example .env
+
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 2. Frontend Setup
+### 2. Frontend
+
+Open a second terminal:
 
 ```bash
 cd frontend
+npm ci
+```
 
-# Install npm packages
-npm install
+Create `frontend/.env.local` with the local API address:
 
-# Start Vite dev server
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+Then start the Vite development server:
+
+```bash
 npm run dev
 ```
 
-Visit `http://localhost:5173` to explore the dashboard.
+Open [http://localhost:5173](http://localhost:5173). The API is available at [http://localhost:8000](http://localhost:8000), with interactive docs at [http://localhost:8000/docs](http://localhost:8000/docs).
 
----
+For Docker and hosted-environment notes, see [Deployment](docs/deployment.md).
 
-## Running Tests & Quality Checks
+## API overview
 
-### Backend Automated Test Suite
-All 40 unit and integration tests validate the API, preprocessing, NMS, mask decoding, and metrics:
+All application routes use the `/api/v1` prefix.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/health` | API and model-loaded status |
+| GET | `/api/v1/model` | Loaded model metadata |
+| POST | `/api/v1/predict/image` | Image detection, segmentation and visualisations |
+| POST | `/api/v1/predict/video` | Frame-by-frame video processing and event summaries |
+| GET | `/api/v1/predict/video/{video_id}/download` | Download a processed video while its temporary file exists |
+| GET | `/api/v1/benchmark` | Run an inference-engine benchmark |
+| GET | `/api/v1/metrics` | In-memory counters for the current API process |
+| GET | `/api/v1/system` | Runtime and dependency information |
+
+The metrics endpoint is process-local and resets when the API process restarts. It is not a persistent monitoring system.
+
+## Tests and quality checks
+
+Run backend tests from the repository root after activating the backend virtual environment:
 
 ```bash
 python -m pytest backend/tests -v
 ```
 
-Output:
-```text
-backend/tests/test_api.py::TestHealthEndpoint::test_health_returns_ok PASSED
-backend/tests/test_api.py::TestModelEndpoint::test_model_info_returns_metadata PASSED
-backend/tests/test_api.py::TestImagePrediction::test_predict_image_valid PASSED
-backend/tests/test_metrics.py::TestIoU::test_perfect_match PASSED
-backend/tests/test_postprocessing.py::TestNMS::test_suppression PASSED
-backend/tests/test_preprocessing.py::TestDecodeImage::test_decode_valid_jpeg PASSED
-...
-============================== 40 passed in 0.48s ==============================
-```
-
-### CLI Benchmark Runner
-Run the standalone benchmarking tool to evaluate engine latency and resource consumption:
+Run frontend checks from `frontend/`:
 
 ```bash
-python scripts/benchmark.py --iterations 50 --format onnx
+npm run lint
+npm run build
 ```
 
----
+Record the actual output from your environment. The README intentionally does not publish a fixed test count or claim that tests pass in every environment.
 
-## API Reference Overview
+## Evaluation and benchmarking
 
-The backend exposes a standardized RESTful API under `/api/v1`:
+The repository contains two distinct tools:
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/v1/health` | Health check and system uptime |
-| `GET` | `/api/v1/model` | Model metadata, input resolution, format, execution provider |
-| `POST` | `/api/v1/predict/image` | Process single image; returns boxes, masks, base64 overlays, metrics |
-| `POST` | `/api/v1/predict/video` | Process video; returns frame summaries, temporal events, metrics |
-| `GET` | `/api/v1/predict/video/{id}/download` | Download annotated video file |
-| `GET` | `/api/v1/benchmark` | Real-time latency (P50/P90/P99), FPS, and RAM profiling |
-| `GET` | `/api/v1/metrics` | System-wide inference counts and cumulative throughput |
-| `GET` | `/api/v1/system` | Server platform, CPU cores, RAM, and Python runtime info |
+- `scripts/evaluate.py` compares predicted binary masks with paired ground-truth PNG masks and calculates mask IoU, Dice, pixel-level precision/recall/F1 and relative area error. It does **not** calculate detection mAP.
+- `scripts/benchmark.py` measures model inference using a generated synthetic input image. The current implementation compares ONNX Runtime and PyTorch/Ultralytics when the relevant model and dependencies are available. It does not implement INT8 quantization or TensorRT benchmarking.
 
----
+See [Model evaluation](docs/model-evaluation.md) for the exact input format and commands. Do not compare benchmark figures unless the model artifact, runtime/provider, hardware, warm-up count, iteration count and input conditions are recorded.
 
-## License & Attribution
+## Data and model notes
 
-Developed as a production-grade Computer Vision portfolio demonstration.
-Model weights and core pipeline: YOLOv8-seg architecture by Ultralytics.
-License: MIT.
+The repository contains dataset preparation guidance, not a complete training or evaluation dataset. Do not assume that a dataset named in the guidance was used to train or validate the checked-in weights.
+
+Before publishing model metrics, record:
+- Dataset name, version, source and licence.
+- Train/validation/test split and image count.
+- Annotation format and class mapping.
+- Model checkpoint and inference settings.
+- Evaluation command and raw output.
+- Hardware and software versions for latency measurements.
+
+See [Dataset guide](data/README.md).
+
+## Current limitations to keep in mind
+
+- The default preprocessing path stretches each image to a square input; aspect ratio is not preserved.
+- The event processor summarises frame-level detections rather than tracking individual defect instances.
+- The evaluator compares binary masks and does not calculate box or mask mAP.
+- The benchmark uses generated synthetic input and measures the inference engine, not the full upload-to-response pipeline.
+- Upload validation checks configured size and extension after the request handler has read the uploaded payload into memory.
+- The optional PyTorch path needs dependencies beyond the default backend requirements.
+
+These are useful areas for future engineering work and should be considered when interpreting results.
+
+## License and attribution
+
+See [LICENSE](LICENSE) for the repository license. The project uses the Ultralytics YOLO ecosystem; review the applicable model and dependency licences before redistribution or commercial use.
