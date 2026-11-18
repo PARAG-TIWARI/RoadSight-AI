@@ -1,35 +1,28 @@
-# RoadSight AI — Dataset & Data Pipeline Guide
+# Dataset preparation guide
 
-## 1. Overview
+This directory currently contains dataset-format guidance. It does not contain the full training or evaluation dataset used to produce the checked-in model weights.
 
-This directory provides guidelines, specifications, and sample schemas for datasets used to train, validate, and benchmark the RoadSight AI YOLOv8-seg pothole detection and instance segmentation models.
+Use this guide when preparing a dataset that you are authorised to use. Record its source, licence, version and split before training or evaluation.
 
----
+## Expected YOLO segmentation layout
 
-## 2. Dataset Structure
+For model training or an Ultralytics validation workflow, a dataset may be organised as:
 
-When preparing custom training or evaluation datasets, format files according to the standard YOLOv8 segmentation structure:
-
-```
+```text
 data/
 ├── images/
 │   ├── train/
-│   │   ├── img_0001.jpg
-│   │   └── img_0002.jpg
-│   └── val/
-│       ├── img_0500.jpg
-│       └── img_0501.jpg
+│   ├── val/
+│   └── test/
 ├── labels/
 │   ├── train/
-│   │   ├── img_0001.txt
-│   │   └── img_0002.txt
-│   └── val/
-│       ├── img_0500.txt
-│       └── img_0501.txt
+│   ├── val/
+│   └── test/
 └── dataset.yaml
 ```
 
-### `dataset.yaml` Schema
+Example `dataset.yaml`:
+
 ```yaml
 path: ./data
 train: images/train
@@ -40,44 +33,50 @@ names:
   0: pothole
 ```
 
----
+Each YOLO segmentation label row represents one object instance:
 
-## 3. Annotation Format
-
-Each line in a `.txt` label file represents one segmented object instance:
-
-$$\text{class\_index } x_1\ y_1\ x_2\ y_2\ x_3\ y_3\ \dots\ x_n\ y_n$$
-
-- Coordinates are normalized between `0.0` and `1.0` relative to image width and height.
-- Minimum 3 vertex pairs defining the closed defect polygon.
-- Class index `0` corresponds to `pothole`.
-
-Example:
 ```text
-0 0.352 0.612 0.380 0.630 0.410 0.645 0.440 0.635 0.420 0.610 0.370 0.605
+class_id x1 y1 x2 y2 x3 y3 ... xn yn
 ```
 
----
+Coordinates are normalised to the image width and height. A polygon requires at least three coordinate pairs. The current model configuration uses one class, `pothole`, at class index `0`.
 
-## 4. Recommended Public Datasets
+## Binary-mask layout for the included evaluator
 
-For retraining, transfer learning, or extended benchmarking:
+The repository's `scripts/evaluate.py` uses a different format: image files and paired binary PNG masks in separate directories.
 
-1. **RDD2022 (Road Damage Dataset)**:
-   - Multi-country road damage dataset (Japan, India, Czech Republic, China, USA).
-   - Covers longitudinal cracks, transverse cracks, alligator cracking, and potholes (D40).
-2. **CRACK500**:
-   - High-resolution pavement distress dataset for structural surface crack segmentation.
-3. **Pothole-600**:
-   - 600+ high-quality annotated pothole images captured from varying camera elevations, wet pavement conditions, and gravel/asphalt roads.
+```text
+evaluation-data/
+├── images/
+│   ├── frame_001.jpg
+│   └── frame_002.png
+└── masks/
+    ├── frame_001.png
+    └── frame_002.png
+```
 
----
+For each input image, the evaluator looks for a PNG mask with the same filename stem. The mask is read as grayscale and thresholded at 127. White/foreground pixels represent the pothole region; black/background pixels represent the rest of the image.
 
-## 5. Augmentation Strategy for Dashcam Domain Adaptation
+See [Model evaluation](../docs/model-evaluation.md) for the exact command and metrics.
 
-Dashcam video presents specific challenges (motion blur, windshield glare, lens distortion, low light). The following augmentation pipeline is recommended during training:
+## Dataset provenance checklist
 
-- **Mosaic & MixUp**: Increases scene complexity and small-target defect density.
-- **Random Perspective & Shear**: Simulates varying camera mounting heights and windshield angles.
-- **HSV Jitter**: Simulates variable lighting, overcast skies, and direct sunlight glare.
-- **Gaussian Blur & Motion Blur**: Simulates vehicle vibration and speed-induced camera blur.
+For every dataset used in training or testing, record:
+
+- Dataset title, source URL and version/date.
+- Licence and any usage restrictions.
+- Number of images and instances per split.
+- Class names and annotation conventions.
+- Train/validation/test split method.
+- Any filtering, deduplication or exclusion applied.
+- Capture conditions and known coverage gaps.
+
+Do not put personal, sensitive or unlicensed imagery in the repository.
+
+## Possible public research datasets
+
+RDD2022, CRACK500 and Pothole-600 are examples of road-damage or pavement-distress datasets that may be relevant to future experiments. Their class definitions and annotation formats differ, so check each dataset's current documentation and licence before using them. Listing a dataset here does not mean it was used to train or validate the model in this repository.
+
+## Training considerations
+
+Road footage can vary substantially by camera angle, lighting, weather, road material and motion blur. When building a training or validation set, avoid leakage between splits (for example, adjacent frames from the same recording appearing in both training and test sets). Record any augmentation pipeline and keep a genuinely held-out test split for final reporting.
